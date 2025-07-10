@@ -10,10 +10,15 @@ import signal
 from pathlib import Path
 import requests
 from datetime import datetime
+try:
+    import tkinter as tk
+    from tkinter import messagebox, scrolledtext
+except ImportError:
+    # 如果tkinter不可用，我们将回退到命令行显示
+    tk = None
 
 # 配置
 TMATE_URL = "https://github.com/zhumengkang/agsb/raw/main/tmate"
-UPLOAD_API = "https://file.zmkk.fun/api/upload"
 USER_HOME = Path.home()
 SSH_INFO_FILE = "ssh.txt"  # 可以自定义文件名
 
@@ -170,61 +175,79 @@ class TmateManager:
             print(f"✗ 保存SSH信息失败: {e}")
             return False
     
-    def upload_to_api(self, user_name="pingpingwq"):
-        """上传SSH信息文件到API"""
+    def show_session_info_popup(self):
+        """在图形弹窗中显示会话信息"""
         try:
-            if not self.ssh_info_path.exists():
-                print("✗ SSH信息文件不存在")
-                return False
+            # 创建弹窗内容
+            content = "=== Tmate 会话信息 ===\n"
+            content += f"创建时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             
-            print("正在上传SSH信息到API...")
+            if 'web_ro' in self.session_info:
+                content += f"只读Web会话: {self.session_info['web_ro']}\n\n"
+            if 'ssh_ro' in self.session_info:
+                content += f"只读SSH会话: {self.session_info['ssh_ro']}\n\n"
+            if 'web_rw' in self.session_info:
+                content += f"可写Web会话: {self.session_info['web_rw']}\n\n"
+            if 'ssh_rw' in self.session_info:
+                content += f"可写SSH会话: {self.session_info['ssh_rw']}\n\n"
             
-            # 读取文件内容
-            with open(self.ssh_info_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            content += "提示: 复制上述连接信息用于远程访问"
             
-            # 创建临时文件用于上传
-            file_name = f"{user_name}.txt"
-            temp_file = USER_HOME / file_name
-            
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            # 上传文件
-            with open(temp_file, 'rb') as f:
-                files = {'file': (file_name, f)}
-                response = requests.post(UPLOAD_API, files=files)
-            
-            # 删除临时文件
-            if temp_file.exists():
-                temp_file.unlink()
-            
-            if response.status_code == 200:
-                try:
-                    result = response.json()
-                    if result.get('success') or result.get('url'):
-                        url = result.get('url', '')
-                        print(f"✓ 文件上传成功!")
-                        print(f"  上传URL: {url}")
-                        
-                        # 保存URL到文件
-                        url_file = USER_HOME / "ssh_upload_url.txt"
-                        with open(url_file, 'w') as f:
-                            f.write(url)
-                        print(f"  URL已保存到: {url_file}")
-                        return True
-                    else:
-                        print(f"✗ API返回错误: {result}")
-                        return False
-                except Exception as e:
-                    print(f"✗ 解析API响应失败: {e}")
-                    return False
-            else:
-                print(f"✗ 上传失败，状态码: {response.status_code}")
-                return False
+            # 尝试使用tkinter显示弹窗
+            if tk:
+                root = tk.Tk()
+                root.withdraw()  # 隐藏主窗口
                 
+                # 创建滚动文本框
+                popup = tk.Toplevel(root)
+                popup.title("Tmate 会话信息")
+                popup.geometry("600x400")
+                popup.resizable(True, True)
+                
+                # 添加文本区域
+                text_area = scrolledtext.ScrolledText(
+                    popup, 
+                    wrap=tk.WORD,
+                    width=70,
+                    height=20,
+                    font=("Courier", 10)
+                )
+                text_area.insert(tk.INSERT, content)
+                text_area.configure(state='disabled')  # 设为只读
+                text_area.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+                
+                # 添加关闭按钮
+                close_button = tk.Button(
+                    popup, 
+                    text="关闭", 
+                    command=popup.destroy,
+                    width=15
+                )
+                close_button.pack(pady=10)
+                
+                # 设置窗口置顶
+                popup.attributes('-topmost', True)
+                popup.update()
+                popup.attributes('-topmost', False)
+                
+                # 运行事件循环
+                root.mainloop()
+            else:
+                print("\n" + "="*40)
+                print(content)
+                print("="*40)
+                print("✓ 会话信息已显示在命令行中")
+                
+            return True
+            
         except Exception as e:
-            print(f"✗ 上传到API失败: {e}")
+            print(f"✗ 显示会话信息弹窗失败: {e}")
+            # 回退到命令行显示
+            print("\n" + "="*40)
+            print("Tmate 会话信息:")
+            for key, value in self.session_info.items():
+                print(f"{key}: {value}")
+            print("="*40)
             return False
     
     def cleanup(self):
@@ -275,16 +298,12 @@ def main():
         if not manager.save_ssh_info():
             return False
         
-        # 4. 上传到API
-        user_name = "pingpingwq"  # 默认文件名，无需交互
-        
-        if not manager.upload_to_api(user_name):
-            return False
+        # 4. 在弹窗中显示会话信息
+        manager.show_session_info_popup()
         
         print("\n=== 所有操作完成 ===")
         print("✓ Tmate会话已在后台运行")
         print(f"✓ 会话信息已保存到: {manager.ssh_info_path}")
-        print(f"✓ 上传URL已保存到: {USER_HOME}/ssh_upload_url.txt")
         print("\n🎉 脚本执行完成！")
         print("📍 Tmate会话将继续在后台运行，可以直接使用SSH连接")
         print("📍 如需停止tmate会话，请执行: pkill -f tmate")
